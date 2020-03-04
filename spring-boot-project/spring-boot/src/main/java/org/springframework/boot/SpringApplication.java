@@ -48,6 +48,7 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.convert.ApplicationConversionService;
 import org.springframework.boot.web.reactive.context.StandardReactiveWebEnvironment;
+import org.springframework.boot.web.servlet.context.AnnotationConfigServletWebServerApplicationContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ApplicationListener;
@@ -240,6 +241,9 @@ public class SpringApplication {
 	private boolean lazyInitialization = false;
 
 	/**
+	 * 创建一个SpringApplication实例， 用于执行实例方法run(String... args)方法
+	 *
+	 *
 	 * Create a new {@link SpringApplication} instance. The application context will load
 	 * beans from the specified primary sources (see {@link SpringApplication class-level}
 	 * documentation for details. The instance can be customized before calling
@@ -254,6 +258,17 @@ public class SpringApplication {
 	}
 
 	/**
+	 * 构造方法：
+	 * 1. 将入参放入primarySources集合中
+	 * 2. 推断应用类型：
+	 *    REACTIVE -- 引入了webflux包的时候
+	 *    NONE  -- 普通的spring应用
+	 *    SERVLET -- 引入了javax.servlet.Servlet类或者org.springframework.web.context.ConfigurableWebApplicationContext
+	 * 3. setInitializers方法, 从所有jar包的META-INF/spring.factories目录下读取org.springframework.context.ApplicationContextInitializer类型的值
+	 *    读取时就是读取key为org.springframework.context.ApplicationContextInitializer的值，并通过反射获取这些类型的class，并放到initializers属性中
+	 * 4. setListeners方法， 与setInitializers方法类似，在META-INF/spring.factories中查找org.springframework.context.ApplicationListener的值
+	 * 5. 判断启动类（就是程序中执行main方法的类）
+	 *
 	 * Create a new {@link SpringApplication} instance. The application context will load
 	 * beans from the specified primary sources (see {@link SpringApplication class-level}
 	 * documentation for details. The instance can be customized before calling
@@ -290,6 +305,43 @@ public class SpringApplication {
 	}
 
 	/**
+	 *
+	 * SpringApplication实例真正调用的run方法：
+	 * 1. 开启计时器StopWatch
+	 * 2. 获取META-INF/spring.factories中的SpringApplicationRunListener，并且启动
+	 * 3. 根据入参构建ApplicationArguments
+	 * 4. prepareEnvironment， 准备环境：
+	 *    4.1 根据构造方法中推断出的webApplicationType, 创建对应的Environment，比如： StandardServletEnvironment
+	 *    4.2 配置环境
+	 *    4.3 发布事件
+	 *    4.4 绑定到应用 这些小步骤有点复杂，没有深入研究 TODO
+	 * 5. 获取spring.beaninfo.ignore属性，不知道干嘛的
+	 * 6. 打印banner
+	 * 7. createApplicationContext: 创建ApplicationContext --- 创建时会根据前面推断的webApplicationType的值来创建具体的context，如下：
+	 *       SERVLET -- AnnotationConfigServletWebServerApplicationContext  -- 常用的web应用, springboot新增的ApplicationContext，
+	 *                  springboot通过jar包启动tomcat就是通过这个context里面的onfresh方法里面调用的createServer来启动tomcat的
+	 *       REACTIVE -- AnnotationConfigReactiveWebServerApplicationContext  -- 5.0新增的响应式应用 (基于Netty)
+	 *       NONE -- AnnotationConfigApplicationContext (默认 -- 普通spring应用，分析spring框架源码时就是从这个类的构造方法入手的)
+	 * 8. 从META-INF/spring.factories中读取SpringBootExceptionReporter，并创建实例，处理异常
+	 * 9. prepareContext -- 准备context 做了很多事情
+	 *    9.1 将第4步的environment变量赋值给context
+	 *    9.2 调用postProcessApplicationContext, 给beanNameGenerator，resourceLoader, context.factory.conversionService赋值
+	 *    9.3 调用之前加载的所有Initializer的initialize方法
+	 *    9.4 使用第2步的runListener发送contextPrepared事件
+	 *    9.5 将第3步中的applicationArguments注册为BeanDefinition
+	 *    9.6 根据入参(构造中封装在primarySources)加载BeanDefinition: 可以加载class, xml, groovy文件 以及扫描package
+	 *    9.7 发送contextLoaded事件
+	 * 10. refreshContext -- 重要步骤
+	 *     调用AbstractApplicationContext.refresh方法， 此处与spring源码中的context的refresh方法接入， 并开始12大步处理，包括扫描组件，初始化bean等，具体看spring框架源码
+	 *     其中spring源码中(spring框架，而不是springboot)refresh中第9步：onRefresh方法：在springboot提供的AnnotationConfigServletWebServerApplicationContext中有从写实现
+	 *     {@link AnnotationConfigServletWebServerApplicationContext#onRefresh()}中的createWebServer用于创建Tomcat,并启动；
+	 *     此处就是springboot带动的spring容器启动，并创建其内嵌的tomcat启动的流程及原理 -- 此处很重要，很多面试官会考察这个点
+	 * 11. afterRefresh -- 空实现
+	 * 12. 发布context启动事件
+	 * 13. callRunner，此处好像启动一个命令行，可以直接在命令行操作springboot应用，(后续再深入研究 TODO)
+	 *
+	 *
+	 *
 	 * Run the Spring application, creating and refreshing a new
 	 * {@link ApplicationContext}.
 	 * @param args the application arguments (usually passed from a Java main method)
@@ -386,9 +438,25 @@ public class SpringApplication {
 		if (this.lazyInitialization) {
 			context.addBeanFactoryPostProcessor(new LazyInitializationBeanFactoryPostProcessor());
 		}
+		/**
+		 * 此处的getAllSources，包括两类， 从启动方法SpringApplicaion.run(Class primaryClass, String...args)可以看出：
+		 * 1. 有一个主配置类(通常就是加了@SpringBootApplication注解，或者加了@Configuration+一大堆@EnableXXX注解的一个类)
+		 * 2. 后面还可以加args参数，但是通常我们使用这个参数，但是可以通过args参数指定配置文件路径(xml，groovy类型都支持)
+		 *
+		 * 所以此处会获取到上面两种类型的Source，后面加载的时候会加载这两种类型中的BeanDefinition
+		 */
 		// Load the sources
 		Set<Object> sources = getAllSources();
 		Assert.notEmpty(sources, "Sources must not be empty");
+		/**
+		 * 该方法可以加载source指定的BeanDefinition, source是SpringApplication.run(Class primaryClass, String...args)方法中的args参数得出的; 这个参数可能是一个类
+		 * 此处加载primaryClass以及args参数指定的BeanDefinition
+		 * 但是一般情况下，就只有一个primaryClass，此处会将其注册为BeanDefinition
+		 * 从该方法内部来看，此处的load方法加载class，xml配置文件，groovy，以及package中的BeanDefinition;
+		 *
+		 * 所以此处的加载非常强大。。。
+		 *
+		 */
 		load(context, sources.toArray(new Object[0]));
 		listeners.contextLoaded(context);
 	}
@@ -1216,6 +1284,8 @@ public class SpringApplication {
 	}
 
 	/**
+	 * 此方法还返回SpringBoot创建的ApplicationContext，因此还可以对context进行操作
+	 *
 	 * Static helper that can be used to run a {@link SpringApplication} from the
 	 * specified source using default settings.
 	 * @param primarySource the primary source to load

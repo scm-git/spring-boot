@@ -133,15 +133,32 @@ class BeanDefinitionLoader {
 	private int load(Object source) {
 		Assert.notNull(source, "Source must not be null");
 		if (source instanceof Class<?>) {
+			/**
+			 * 此处加载的是java类定义的配置类，也可能是一个groovy定义的类
+			 */
 			return load((Class<?>) source);
 		}
 		if (source instanceof Resource) {
+			/**
+			 * 1. 从.groovy类型的文件加载BeanDefinition
+			 * 2. 也可能是一个xml类型的配置文件
+			 */
 			return load((Resource) source);
 		}
 		if (source instanceof Package) {
+			/**
+			 * 如果是指定的一个包类型，则扫描这个包，加载下面的所有的@Bean, @Component, @Import, @ImportResource定义的BeanDefinition
+			 */
 			return load((Package) source);
 		}
 		if (source instanceof CharSequence) {
+			/**
+			 * 如果是一个字符串，则会尝试以下三种方式来加载：
+			 * 1. 假设是一个class， 则以配置类的方式来加载
+			 * 2. 假设是一个xml配置文件， 则以xml配置文件的方式加载
+			 * 3. 假设是一个package， 则以包扫描的方式加载
+			 * 也就是将上面三种方式都尝试一遍，所以这种方式是最强大的，非常厉害啊。。。
+			 */
 			return load((CharSequence) source);
 		}
 		throw new IllegalArgumentException("Invalid source type " + source.getClass());
