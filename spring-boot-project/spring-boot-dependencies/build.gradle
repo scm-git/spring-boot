@@ -367,7 +367,7 @@ bom {
 			]
 		}
 	}
-	library("Groovy", "2.5.9") {
+	library("Groovy", "2.5.10") {
 		group("org.codehaus.groovy") {
 			modules = [
 				"groovy",
@@ -1615,6 +1615,13 @@ bom {
 				"spring-batch-infrastructure",
 				"spring-batch-integration",
 				"spring-batch-test"
+			]
+		}
+	}
+	library("Spring Data Couchbase", "4.0.0.M3") {
+		group("org.springframework.data") {
+			modules = [
+				"spring-data-couchbase"
 			]
 		}
 	}
