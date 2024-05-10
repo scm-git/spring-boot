@@ -32,6 +32,8 @@ import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.util.ErrorHandler;
 
 /**
+ * 该Listener是在spring.factories中配置的， SpringApplication.run()方法执行时通过getRunListeners()从META-INF/spring.factories中加载
+ *
  * {@link SpringApplicationRunListener} to publish {@link SpringApplicationEvent}s.
  * <p>
  * Uses an internal {@link ApplicationEventMulticaster} for the events that are fired

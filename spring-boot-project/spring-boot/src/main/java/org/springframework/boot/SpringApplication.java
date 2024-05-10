@@ -260,13 +260,15 @@ public class SpringApplication {
 	/**
 	 * 构造方法：
 	 * 1. 将入参放入primarySources集合中
-	 * 2. 推断应用类型：
-	 *    REACTIVE -- 引入了webflux包的时候
-	 *    NONE  -- 普通的spring应用
-	 *    SERVLET -- 引入了javax.servlet.Servlet类或者org.springframework.web.context.ConfigurableWebApplicationContext
+	 * 2. 推断应用类型： {@link WebApplicationType#deduceFromClasspath()}
+	 *    REACTIVE -- 如果引入了webflux包且未引入webmvc的的时候
+	 *    			  代码中判断 存在{@link WebApplicationType#WEBFLUX_INDICATOR_CLASS}且不存在{@link WebApplicationType#WEBMVC_INDICATOR_CLASS}时
+	 *    			  spring cloud gateway就是启动的就是REACTIVE类型的应用
+	 *    NONE  -- 普通的spring应用： 没有引入Servlet或ConfigurableWebApplicationContext时 {@link WebApplicationType#SERVLET_INDICATOR_CLASSES}
+	 *    SERVLET -- 不是以上两种情况时，就是Servlet应用
 	 * 3. setInitializers方法, 从所有jar包的META-INF/spring.factories目录下读取org.springframework.context.ApplicationContextInitializer类型的值
 	 *    读取时就是读取key为org.springframework.context.ApplicationContextInitializer的值，并通过反射获取这些类型的class，并放到initializers属性中
-	 * 4. setListeners方法， 与setInitializers方法类似，在META-INF/spring.factories中查找org.springframework.context.ApplicationListener的值
+	 * 4. setListeners方法， 与setInitializers方法类似，在META-INF/spring.factories中查找org.springframework.context.ApplicationListener的值,放到listeners属性中
 	 * 5. 判断启动类（就是程序中执行main方法的类）
 	 *
 	 * Create a new {@link SpringApplication} instance. The application context will load
@@ -308,13 +310,23 @@ public class SpringApplication {
 	 *
 	 * SpringApplication实例真正调用的run方法：
 	 * 1. 开启计时器StopWatch
-	 * 2. 获取META-INF/spring.factories中的SpringApplicationRunListener，并且启动
+	 * 2. 获取META-INF/spring.factories中的SpringApplicationRunListener
+	 * 		2.1 getRunListeners()方法通过SPI的方式，从spring.factories中获取SpringApplicationRunListener，并构建出实例
+	 * 		2.2 spring boot 默认的配置的SpringApplicationRunListener为{@link org.springframework.boot.context.event.EventPublishingRunListener}
+	 * 		2.3 发布starting事件
+	 * 	 	2.4 该Listener的事件及顺序如下：
+	 * 	 		starting -> environmentPrepared -> contextPrepared -> contextLoaded -> started -> running
+	 * 	 		failed	后面5个步骤如果出现异常，则发布failed事件
+	 *
 	 * 3. 根据入参构建ApplicationArguments
 	 * 4. prepareEnvironment， 准备环境：
 	 *    4.1 根据构造方法中推断出的webApplicationType, 创建对应的Environment，比如： StandardServletEnvironment
 	 *    4.2 配置环境
 	 *    4.3 发布事件
 	 *    4.4 绑定到应用 这些小步骤有点复杂，没有深入研究 TODO
+	 *    4.5 这个步骤会调用构造方法加载的所有ApplicationListener，这是一个非常重要的扩展点， 很多框架利用这个Listener在启动时实现了很多复杂逻辑
+	 *    		比如，Spring Cloud的spring-cloud-context模块中，就使用了BootstrapApplicationListener 在启动时又创建了一个Spring容器(ApplicationContext)
+	 *
 	 * 5. 获取spring.beaninfo.ignore属性，不知道干嘛的
 	 * 6. 打印banner
 	 * 7. createApplicationContext: 创建ApplicationContext --- 创建时会根据前面推断的webApplicationType的值来创建具体的context，如下：
@@ -353,6 +365,8 @@ public class SpringApplication {
 		ConfigurableApplicationContext context = null;
 		Collection<SpringBootExceptionReporter> exceptionReporters = new ArrayList<>();
 		configureHeadlessProperty();
+		// 通过spi获取SpringApplicationRunListener;
+		// spring boot默认会配置一个org.springframework.boot.context.event.EventPublishingRunListener
 		SpringApplicationRunListeners listeners = getRunListeners(args);
 		listeners.starting();
 		try {
